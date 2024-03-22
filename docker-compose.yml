@@ -1,0 +1,132 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      PGDATA: /data/postgres
+    volumes:
+       - ./mounts/postgres:/data/postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - preschoolbe
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    depends_on:
+      - postgres
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: 123456
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "28080:8080"
+    command:
+      - start-dev
+    networks:
+      - preschoolbe
+    restart: always
+    volumes:
+      - ./mounts/keycloak-data/standalone:/opt/jboss/keycloak/standalone/data/
+      - ./mounts/keycloak-data/root-data:/opt/keycloak/data/
+
+  kafka:
+    image: confluentinc/cp-kafka:6.0.14
+    depends_on:
+      - zookeeper
+    ports:
+      - '29092:29092'
+    networks:
+      - preschoolbe
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_ADVERTISED_LISTENERS: LISTENER_DOCKER_INTERNAL://kafka:9092,LISTENER_DOCKER_EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - 8085:8080
+    networks:
+      - preschoolbe
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: 'true'
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.0.14
+    ports:
+      - '22181:2181'
+    networks:
+      - preschoolbe
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  redis:
+    image: redis:latest
+    command: redis-server
+    volumes:
+      - ./mounts/redis:/var/lib/redis
+      - ./mounts/redis-config:/usr/local/etc/redis/redis.conf
+    ports:
+      - 6379:6379
+    networks:
+      - preschoolbe
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+      - HTTP_USER=root
+      - HTTP_PASSWORD=qwerty
+    ports:
+      - 8081:8081
+    networks:
+      - preschoolbe
+    depends_on:
+      - redis
+
+  mongo:
+    image: 'mongo:7.0.5'
+    ports:
+      - 27018:27017
+    networks:
+      - preschoolbe
+    volumes:
+      - ./mounts/mongo-data:/var/lib/mongodb/data
+
+  mongo-express:
+    image: 'mongo-express:1.0.2'
+    ports:
+      - 8082:8081
+    networks:
+      - preschoolbe
+    environment:
+      ME_CONFIG_BASICAUTH_USERNAME: username
+      ME_CONFIG_BASICAUTH_PASSWORD: password
+
+  nexus-repository-service:
+    container_name: nexus-repository
+    image: sonatype/nexus3:3.38.0
+    volumes:
+    - ./mounts/nexus-data:/nexus-data
+    ports:
+    - 28082:8081
+    networks:
+    - preschoolbe
+
+networks:
+  preschoolbe:
+    driver: bridge

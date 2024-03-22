@@ -1,0 +1,7 @@
+mounts/keycloak-data/*
+mounts/mongo-data/*
+mounts/nexus-data/*
+mounts/postgres/*
+mounts/redis/*
+mounts/redis-config/*
+
