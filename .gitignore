@@ -1,4 +1,5 @@
-mounts/keycloak-data/*
+mounts/keycloak-data/root-data/*
+mounts/keycloak-data/standalone/*
 mounts/mongo-data/*
 mounts/nexus-data/*
 mounts/postgres/*
