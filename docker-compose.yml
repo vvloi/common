@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   postgres:
     image: postgres
@@ -126,6 +124,35 @@ services:
     - 28082:8081
     networks:
     - preschoolbe
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - "4566:4566" # LocalStack Gateway
+      - "4571:4571" # SQS
+      - "4572:4572" # SNS
+      - "4579:4579" # SES
+    environment:
+      - SERVICES=s3,sns,sqs,ses # Chạy các dịch vụ S3, SNS, SQS, SES
+      - EDGE_PORT=4566
+      - DEFAULT_REGION=us-east-1
+      - DATA_DIR=/tmp/localstack/data # Lưu dữ liệu persistent
+    volumes:
+      - "./mounts/localstack:/tmp/localstack" # Mount data của LocalStack
+    networks:
+      - preschoolbe
+
+  argocd:
+    image: argoproj/argocd:latest
+    container_name: argocd
+    ports:
+      - "8080:8080" # Giao diện ArgoCD
+    command: ["/argocd-server", "--staticassets", "/shared/app"]
+    volumes:
+      - "./mounts/argocd:/data" # Mount data của ArgoCD
+    networks:
+      - preschoolbe
 
 networks:
   preschoolbe:
