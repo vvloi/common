@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: 123456
       PGDATA: /data/postgres
     volumes:
-       - ./mounts/postgres:/data/postgres
+       - ./mounts/postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     networks:
@@ -137,9 +137,9 @@ services:
       - SERVICES=s3,sns,sqs,ses # Chạy các dịch vụ S3, SNS, SQS, SES
       - EDGE_PORT=4566
       - DEFAULT_REGION=us-east-1
-      - DATA_DIR=/tmp/localstack/data # Lưu dữ liệu persistent
+      - DATA_DIR=/var/lib/localstack/data # Chỉ định nơi lưu trữ dữ liệu trong container
     volumes:
-      - "./mounts/localstack:/tmp/localstack" # Mount data của LocalStack
+      - ./mounts/localstack:/var/lib/localstack/data # Mount thư mục trên host vào container
     networks:
       - preschoolbe
 
@@ -148,7 +148,7 @@ services:
     container_name: argocd
     ports:
       - "8080:8080" # Giao diện ArgoCD
-    command: ["/argocd-server", "--staticassets", "/shared/app"]
+    command: ["/usr/local/bin/argocd-server", "--staticassets", "/shared/app"]
     volumes:
       - "./mounts/argocd:/data" # Mount data của ArgoCD
     networks:
