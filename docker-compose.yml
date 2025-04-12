@@ -1,46 +1,56 @@
+version: '3.8'
+
 services:
   postgres:
-    image: postgres
+    image: postgres:latest
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 123456
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
       PGDATA: /data/postgres
     volumes:
-       - ./mounts/postgres:/var/lib/postgresql/data
+      - ./mounts/postgres/data:/var/lib/postgresql/data
+      - ./mounts/postgres/init:/docker-entrypoint-initdb.d
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     networks:
       - preschoolbe
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   keycloak:
     image: quay.io/keycloak/keycloak:latest
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres/keycloak
-      KC_DB_USERNAME: postgres
-      KC_DB_PASSWORD: 123456
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
     ports:
-      - "28080:8080"
+      - "${KEYCLOAK_PORT:-28080}:8080"
     command:
       - start-dev
     networks:
       - preschoolbe
     restart: always
     volumes:
-      - ./mounts/keycloak-data/standalone:/opt/jboss/keycloak/standalone/data/
-      - ./mounts/keycloak-data/root-data:/opt/keycloak/data/
+      - ./mounts/keycloak/standalone:/opt/jboss/keycloak/standalone/data
+      - ./mounts/keycloak/root:/opt/keycloak/data
 
   kafka:
     image: confluentinc/cp-kafka:6.0.14
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
-      - '29092:29092'
+      - '${KAFKA_PORT:-29092}:29092'
     networks:
       - preschoolbe
     environment:
@@ -50,109 +60,155 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-  
+    volumes:
+      - ./mounts/kafka/data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     ports:
-      - 8085:8080
+      - ${KAFKA_UI_PORT:-8085}:8080
     networks:
       - preschoolbe
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       DYNAMIC_CONFIG_ENABLED: 'true'
+    depends_on:
+      kafka:
+        condition: service_healthy
 
   zookeeper:
     image: confluentinc/cp-zookeeper:6.0.14
     ports:
-      - '22181:2181'
+      - '${ZOOKEEPER_PORT:-22181}:2181'
     networks:
       - preschoolbe
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - ./mounts/zookeeper/data:/var/lib/zookeeper/data
+      - ./mounts/zookeeper/log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:latest
-    command: redis-server
+    command: redis-server /usr/local/etc/redis/redis.conf
     volumes:
-      - ./mounts/redis:/var/lib/redis
-      - ./mounts/redis-config:/usr/local/etc/redis/redis.conf
+      - ./mounts/redis/data:/data
+      - ./mounts/redis/config/redis.conf:/usr/local/etc/redis/redis.conf
     ports:
-      - 6379:6379
+      - ${REDIS_PORT:-6379}:6379
     networks:
       - preschoolbe
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis-commander:
     image: rediscommander/redis-commander:latest
     environment:
       - REDIS_HOSTS=local:redis:6379
-      - HTTP_USER=root
-      - HTTP_PASSWORD=qwerty
+      - HTTP_USER=${REDIS_COMMANDER_USER:-root}
+      - HTTP_PASSWORD=${REDIS_COMMANDER_PASSWORD:-qwerty}
     ports:
-      - 8081:8081
+      - ${REDIS_COMMANDER_PORT:-8081}:8081
     networks:
       - preschoolbe
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   mongo:
     image: 'mongo:7.0.5'
     ports:
-      - 27018:27017
+      - ${MONGO_PORT:-27018}:27017
     networks:
       - preschoolbe
     volumes:
-      - ./mounts/mongo-data:/var/lib/mongodb/data
+      - ./mounts/mongo/data:/data/db
+      - ./mounts/mongo/config:/data/configdb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password}
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
 
   mongo-express:
     image: 'mongo-express:1.0.2'
     ports:
-      - 8082:8081
+      - ${MONGO_EXPRESS_PORT:-8082}:8081
     networks:
       - preschoolbe
     environment:
-      ME_CONFIG_BASICAUTH_USERNAME: username
-      ME_CONFIG_BASICAUTH_PASSWORD: password
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-username}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-password}
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:-admin}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:-password}
+    depends_on:
+      mongo:
+        condition: service_healthy
 
-  nexus-repository-service:
-    container_name: nexus-repository
-    image: sonatype/nexus3:3.38.0
-    volumes:
-    - ./mounts/nexus-data:/nexus-data
-    ports:
-    - 28082:8081
-    networks:
-    - preschoolbe
 
   localstack:
     image: localstack/localstack:latest
     container_name: localstack
     ports:
-      - "4566:4566" # LocalStack Gateway
-      - "4571:4571" # SQS
-      - "4572:4572" # SNS
-      - "4579:4579" # SES
+      - "${LOCALSTACK_PORT:-4566}:4566"
+      - "${LOCALSTACK_SQS_PORT:-4571}:4571"
+      - "${LOCALSTACK_SNS_PORT:-4572}:4572"
+      - "${LOCALSTACK_SES_PORT:-4579}:4579"
     environment:
-      - SERVICES=s3,sns,sqs,ses # Chạy các dịch vụ S3, SNS, SQS, SES
+      - SERVICES=s3,sns,sqs,ses
       - EDGE_PORT=4566
-      - DEFAULT_REGION=us-east-1
-      - DATA_DIR=/var/lib/localstack/data # Chỉ định nơi lưu trữ dữ liệu trong container
+      - DEFAULT_REGION=${AWS_REGION:-us-east-1}
+      - DATA_DIR=/var/lib/localstack/data
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-test}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-test}
     volumes:
-      - ./mounts/localstack:/var/lib/localstack/data # Mount thư mục trên host vào container
+      - ./mounts/localstack/data:/var/lib/localstack/data
+      - ./mounts/localstack/init:/docker-entrypoint-initaws.d
     networks:
       - preschoolbe
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   argocd:
     image: argoproj/argocd:latest
     container_name: argocd
     ports:
-      - "8080:8080" # Giao diện ArgoCD
+      - "${ARGOCD_PORT:-8080}:8080"
     command: ["/usr/local/bin/argocd-server", "--staticassets", "/shared/app"]
     volumes:
-      - "./mounts/argocd:/data" # Mount data của ArgoCD
+      - "./mounts/argocd/data:/data"
+      - "./mounts/argocd/config:/app/config"
     networks:
       - preschoolbe
+    environment:
+      - ARGOCD_SERVER_ENABLE_GZIP=true
+      - ARGOCD_SERVER_ENABLE_GRPC=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   preschoolbe:
