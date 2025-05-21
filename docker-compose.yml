@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
@@ -22,7 +20,7 @@ services:
       retries: 5
 
   keycloak:
-    image: quay.io/keycloak/keycloak:latest
+    image: quay.io/keycloak/keycloak:24.0.3
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,31 +33,33 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
     ports:
       - "${KEYCLOAK_PORT:-28080}:8080"
-    command:
-      - start-dev
+    command: start-dev
     networks:
       - preschoolbe
     restart: always
     volumes:
-      - ./mounts/keycloak/standalone:/opt/jboss/keycloak/standalone/data
-      - ./mounts/keycloak/root:/opt/keycloak/data
+      - ./mounts/keycloak/standalone:/opt/keycloak/data
 
   kafka:
-    image: confluentinc/cp-kafka:6.0.14
-    depends_on:
-      zookeeper:
-        condition: service_healthy
+    image: confluentinc/cp-kafka:7.6.0
     ports:
       - '${KAFKA_PORT:-29092}:29092'
     networks:
       - preschoolbe
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_ADVERTISED_LISTENERS: LISTENER_DOCKER_INTERNAL://kafka:9092,LISTENER_DOCKER_EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER_INTERNAL
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://${DOCKER_HOST_IP:-0.0.0.0}:29092,CONTROLLER://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://${DOCKER_HOST_IP:-localhost}:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: 'gqxskHgrT7yG4GzC_x91cg' # bạn có thể random bằng base64(uuid) nếu cần
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+
     volumes:
       - ./mounts/kafka/data:/var/lib/kafka/data
     healthcheck:
@@ -82,26 +82,8 @@ services:
       kafka:
         condition: service_healthy
 
-  zookeeper:
-    image: confluentinc/cp-zookeeper:6.0.14
-    ports:
-      - '${ZOOKEEPER_PORT:-22181}:2181'
-    networks:
-      - preschoolbe
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    volumes:
-      - ./mounts/zookeeper/data:/var/lib/zookeeper/data
-      - ./mounts/zookeeper/log:/var/lib/zookeeper/log
-    healthcheck:
-      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   redis:
-    image: redis:latest
+    image: redis:7.2
     command: redis-server /usr/local/etc/redis/redis.conf
     volumes:
       - ./mounts/redis/data:/data
@@ -131,7 +113,7 @@ services:
         condition: service_healthy
 
   mongo:
-    image: 'mongo:7.0.5'
+    image: mongo:7.0.9
     ports:
       - ${MONGO_PORT:-27018}:27017
     networks:
@@ -147,9 +129,8 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
-
   mongo-express:
-    image: 'mongo-express:1.0.2'
+    image: mongo-express:1.0.2
     ports:
       - ${MONGO_EXPRESS_PORT:-8082}:8081
     networks:
@@ -162,10 +143,8 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
-
-
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:3.3
     container_name: localstack
     ports:
       - "${LOCALSTACK_PORT:-4566}:4566"
@@ -189,26 +168,26 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  argocd:
-    image: argoproj/argocd:latest
-    container_name: argocd
+  oracle:
+    image: gvenzl/oracle-xe:18.4.0-slim
+    container_name: oracle-xe
     ports:
-      - "${ARGOCD_PORT:-8080}:8080"
-    command: ["/usr/local/bin/argocd-server", "--staticassets", "/shared/app"]
+      - "${ORACLE_PORT:-1521}:1521"
+      - "${ORACLE_WEB_PORT:-5500}:5500"
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-oracle123}     # SYS, SYSTEM, PDBADMIN
+      APP_USER: ${ORACLE_USER:-appuser}                  # user cho app (tùy chọn)
+      APP_USER_PASSWORD: ${ORACLE_USER_PASSWORD:-apppw}  # mật khẩu user app
     volumes:
-      - "./mounts/argocd/data:/data"
-      - "./mounts/argocd/config:/app/config"
+      - ./mounts/oracle/data:/opt/oracle/oradata
     networks:
       - preschoolbe
-    environment:
-      - ARGOCD_SERVER_ENABLE_GZIP=true
-      - ARGOCD_SERVER_ENABLE_GRPC=true
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s system/${ORACLE_PASSWORD:-oracle123}@localhost/XEPDB1 || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
 networks:
   preschoolbe:
